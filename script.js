@@ -16,7 +16,9 @@
   const restartButton = document.querySelector("#restart-button");
   const modalRestartButton = document.querySelector("#modal-restart-button");
   const modalElement = document.querySelector("#game-over-modal");
+  const touchControlsElement = document.querySelector("#touch-controls");
   const tileElements = [];
+  const mobileControls = window.Mobile2048Controls;
 
   function getSafeStorage() {
     try {
@@ -247,6 +249,7 @@
   let leaderboard = loadScores(storage);
   let animationLock = false;
   let pendingBoardAnimationFrame = null;
+  let touchStartPoint = null;
 
   function initializeBoard() {
     boardElement.innerHTML = "";
@@ -277,6 +280,21 @@
         boardElement.classList.remove("board-moving-" + direction);
       }, 140);
     });
+  }
+
+  function syncTouchControlsVisibility() {
+    if (!mobileControls) {
+      touchControlsElement.classList.add("hidden");
+      return;
+    }
+
+    const coarseQuery = window.matchMedia ? window.matchMedia("(any-pointer: coarse)") : null;
+    const visible = mobileControls.shouldShowTouchControls({
+      maxTouchPoints: navigator.maxTouchPoints || 0,
+      anyPointerCoarse: coarseQuery ? coarseQuery.matches : false,
+    });
+
+    touchControlsElement.classList.toggle("hidden", !visible);
   }
 
   function renderBoard(previousBoard) {
@@ -386,9 +404,61 @@
     handleMove(direction);
   });
 
+  boardElement.addEventListener("touchstart", function (event) {
+    const touch = event.touches[0];
+    if (!touch) {
+      return;
+    }
+
+    touchStartPoint = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+    };
+  }, { passive: true });
+
+  boardElement.addEventListener("touchend", function (event) {
+    if (!touchStartPoint || !mobileControls) {
+      touchStartPoint = null;
+      return;
+    }
+
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      touchStartPoint = null;
+      return;
+    }
+
+    const direction = mobileControls.getSwipeDirection({
+      startX: touchStartPoint.startX,
+      startY: touchStartPoint.startY,
+      endX: touch.clientX,
+      endY: touch.clientY,
+      threshold: 24,
+    });
+
+    touchStartPoint = null;
+
+    if (!direction) {
+      return;
+    }
+
+    event.preventDefault();
+    handleMove(direction);
+  });
+
+  touchControlsElement.addEventListener("click", function (event) {
+    const button = event.target.closest("[data-direction]");
+    if (!button) {
+      return;
+    }
+
+    handleMove(button.getAttribute("data-direction"));
+  });
+
   restartButton.addEventListener("click", restartGame);
   modalRestartButton.addEventListener("click", restartGame);
 
   initializeBoard();
+  syncTouchControlsVisibility();
   render();
 })();

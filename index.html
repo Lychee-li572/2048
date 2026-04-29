@@ -26,6 +26,13 @@
         <div id="board" class="board"></div>
       </section>
 
+      <section id="touch-controls" class="touch-controls hidden" aria-label="移动端方向控制">
+        <button class="touch-button touch-up" type="button" data-direction="up">↑</button>
+        <button class="touch-button touch-left" type="button" data-direction="left">←</button>
+        <button class="touch-button touch-right" type="button" data-direction="right">→</button>
+        <button class="touch-button touch-down" type="button" data-direction="down">↓</button>
+      </section>
+
       <section class="leaderboard-card" aria-labelledby="leaderboard-title">
         <div class="leaderboard-header">
           <h2 id="leaderboard-title">本地前 10 名</h2>
@@ -45,6 +52,7 @@
       </div>
     </div>
 
+    <script src="./src/mobile-controls.js"></script>
     <script src="./script.js"></script>
   </body>
 </html>
