@@ -1,0 +1,394 @@
+(function () {
+  const BOARD_SIZE = 4;
+  const STORAGE_KEY = "game-2048-leaderboard";
+  const KEYBOARD_DIRECTION_MAP = {
+    ArrowUp: "up",
+    ArrowDown: "down",
+    ArrowLeft: "left",
+    ArrowRight: "right",
+  };
+
+  const boardElement = document.querySelector("#board");
+  const scoreElement = document.querySelector("#score");
+  const finalScoreElement = document.querySelector("#final-score");
+  const leaderboardListElement = document.querySelector("#leaderboard-list");
+  const leaderboardEmptyElement = document.querySelector("#leaderboard-empty");
+  const restartButton = document.querySelector("#restart-button");
+  const modalRestartButton = document.querySelector("#modal-restart-button");
+  const modalElement = document.querySelector("#game-over-modal");
+  const tileElements = [];
+
+  function getSafeStorage() {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  }
+
+  function cloneBoard(board) {
+    return board.map((row) => row.slice());
+  }
+
+  function createEmptyBoard() {
+    return Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
+  }
+
+  function boardsAreEqual(left, right) {
+    return left.every((row, rowIndex) =>
+      row.every((value, colIndex) => value === right[rowIndex][colIndex])
+    );
+  }
+
+  function getEmptyCells(board) {
+    const cells = [];
+
+    for (let row = 0; row < BOARD_SIZE; row += 1) {
+      for (let col = 0; col < BOARD_SIZE; col += 1) {
+        if (board[row][col] === 0) {
+          cells.push({ row, col });
+        }
+      }
+    }
+
+    return cells;
+  }
+
+  function mergeRowLeft(row) {
+    const values = row.filter((value) => value !== 0);
+    const merged = [];
+    let scoreGain = 0;
+
+    for (let index = 0; index < values.length; index += 1) {
+      if (values[index] === values[index + 1]) {
+        const mergedValue = values[index] * 2;
+        merged.push(mergedValue);
+        scoreGain += mergedValue;
+        index += 1;
+      } else {
+        merged.push(values[index]);
+      }
+    }
+
+    while (merged.length < BOARD_SIZE) {
+      merged.push(0);
+    }
+
+    return { row: merged, scoreGain };
+  }
+
+  function reverseRows(board) {
+    return board.map((row) => row.slice().reverse());
+  }
+
+  function transpose(board) {
+    return board[0].map((_, colIndex) => board.map((row) => row[colIndex]));
+  }
+
+  function moveBoardLeft(board) {
+    const movedRows = board.map((row) => mergeRowLeft(row));
+    const nextBoard = movedRows.map((entry) => entry.row);
+
+    return {
+      board: nextBoard,
+      scoreGain: movedRows.reduce((sum, entry) => sum + entry.scoreGain, 0),
+      moved: !boardsAreEqual(board, nextBoard),
+    };
+  }
+
+  function applyMove(board, direction) {
+    if (direction === "left") {
+      return moveBoardLeft(cloneBoard(board));
+    }
+
+    if (direction === "right") {
+      const reversed = reverseRows(cloneBoard(board));
+      const moved = moveBoardLeft(reversed);
+      return {
+        board: reverseRows(moved.board),
+        scoreGain: moved.scoreGain,
+        moved: moved.moved,
+      };
+    }
+
+    if (direction === "up") {
+      const transposed = transpose(cloneBoard(board));
+      const moved = moveBoardLeft(transposed);
+      return {
+        board: transpose(moved.board),
+        scoreGain: moved.scoreGain,
+        moved: moved.moved,
+      };
+    }
+
+    if (direction === "down") {
+      const transposed = transpose(cloneBoard(board));
+      const reversed = reverseRows(transposed);
+      const moved = moveBoardLeft(reversed);
+      return {
+        board: transpose(reverseRows(moved.board)),
+        scoreGain: moved.scoreGain,
+        moved: moved.moved,
+      };
+    }
+
+    return {
+      board: cloneBoard(board),
+      scoreGain: 0,
+      moved: false,
+    };
+  }
+
+  function addRandomTile(board) {
+    const nextBoard = cloneBoard(board);
+    const emptyCells = getEmptyCells(nextBoard);
+
+    if (emptyCells.length === 0) {
+      return nextBoard;
+    }
+
+    const index = Math.floor(Math.random() * emptyCells.length);
+    const cell = emptyCells[index];
+    nextBoard[cell.row][cell.col] = Math.random() < 0.9 ? 2 : 4;
+
+    return nextBoard;
+  }
+
+  function isGameOver(board) {
+    for (let row = 0; row < BOARD_SIZE; row += 1) {
+      for (let col = 0; col < BOARD_SIZE; col += 1) {
+        const value = board[row][col];
+
+        if (value === 0) {
+          return false;
+        }
+
+        if (board[row][col + 1] === value || (board[row + 1] && board[row + 1][col] === value)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  function createInitialState() {
+    let board = createEmptyBoard();
+    board = addRandomTile(board);
+    board = addRandomTile(board);
+
+    return {
+      board,
+      score: 0,
+      gameOver: false,
+    };
+  }
+
+  function normalizeScores(scores) {
+    if (!Array.isArray(scores)) {
+      return [];
+    }
+
+    return scores
+      .filter((entry) => Number.isFinite(Number(entry && entry.score)))
+      .map((entry) => ({
+        score: Number(entry.score),
+        timestamp: Number(entry.timestamp) || Date.now(),
+      }))
+      .sort((left, right) => right.score - left.score || left.timestamp - right.timestamp)
+      .slice(0, 10);
+  }
+
+  function loadScores(storage) {
+    if (!storage) {
+      return [];
+    }
+
+    try {
+      const raw = storage.getItem(STORAGE_KEY);
+      return raw ? normalizeScores(JSON.parse(raw)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveScore(storage, score, timestamp) {
+    const nextScores = normalizeScores(
+      loadScores(storage).concat({ score, timestamp: timestamp || Date.now() })
+    );
+
+    if (!storage) {
+      return nextScores;
+    }
+
+    try {
+      storage.setItem(STORAGE_KEY, JSON.stringify(nextScores));
+    } catch {
+      return nextScores;
+    }
+
+    return nextScores;
+  }
+
+  function getTileClassName(value) {
+    if (value === 0) {
+      return "tile tile-empty";
+    }
+
+    if (value > 2048) {
+      return "tile tile-super";
+    }
+
+    return "tile tile-" + value;
+  }
+
+  const storage = getSafeStorage();
+  let state = createInitialState();
+  let leaderboard = loadScores(storage);
+  let animationLock = false;
+  let pendingBoardAnimationFrame = null;
+
+  function initializeBoard() {
+    boardElement.innerHTML = "";
+
+    for (let index = 0; index < BOARD_SIZE * BOARD_SIZE; index += 1) {
+      const tile = document.createElement("div");
+      tile.className = "tile tile-empty";
+      boardElement.appendChild(tile);
+      tileElements.push(tile);
+    }
+  }
+
+  function animateBoard(direction) {
+    boardElement.classList.remove(
+      "board-moving-left",
+      "board-moving-right",
+      "board-moving-up",
+      "board-moving-down"
+    );
+
+    if (pendingBoardAnimationFrame !== null) {
+      cancelAnimationFrame(pendingBoardAnimationFrame);
+    }
+
+    pendingBoardAnimationFrame = requestAnimationFrame(function () {
+      boardElement.classList.add("board-moving-" + direction);
+      window.setTimeout(function () {
+        boardElement.classList.remove("board-moving-" + direction);
+      }, 140);
+    });
+  }
+
+  function renderBoard(previousBoard) {
+    state.board.forEach((row, rowIndex) => {
+      row.forEach((value, colIndex) => {
+        const tileIndex = rowIndex * BOARD_SIZE + colIndex;
+        const tile = tileElements[tileIndex];
+        const previousValue = previousBoard ? previousBoard[rowIndex][colIndex] : null;
+
+        tile.className = getTileClassName(value);
+        tile.textContent = value === 0 ? "" : String(value);
+
+        if (previousBoard && previousValue !== value && value !== 0) {
+          tile.classList.add("tile-updated");
+          window.setTimeout(function () {
+            tile.classList.remove("tile-updated");
+          }, 180);
+        }
+      });
+    });
+  }
+
+  function renderScore() {
+    scoreElement.textContent = String(state.score);
+  }
+
+  function renderLeaderboard() {
+    leaderboardListElement.innerHTML = "";
+
+    if (leaderboard.length === 0) {
+      leaderboardEmptyElement.classList.remove("hidden");
+      return;
+    }
+
+    leaderboardEmptyElement.classList.add("hidden");
+
+    leaderboard.forEach((entry, index) => {
+      const item = document.createElement("li");
+      item.textContent = "第 " + (index + 1) + " 名：" + entry.score + " 分";
+      leaderboardListElement.appendChild(item);
+    });
+  }
+
+  function showGameOver() {
+    finalScoreElement.textContent = String(state.score);
+    modalElement.classList.remove("hidden");
+  }
+
+  function hideGameOver() {
+    modalElement.classList.add("hidden");
+  }
+
+  function render(previousBoard) {
+    renderBoard(previousBoard);
+    renderScore();
+    renderLeaderboard();
+  }
+
+  function restartGame() {
+    state = createInitialState();
+    hideGameOver();
+    animationLock = false;
+    render();
+  }
+
+  function handleMove(direction) {
+    if (state.gameOver || animationLock) {
+      return;
+    }
+
+    const previousBoard = cloneBoard(state.board);
+    const result = applyMove(state.board, direction);
+    if (!result.moved) {
+      return;
+    }
+
+    const nextBoard = addRandomTile(result.board);
+    const nextScore = state.score + result.scoreGain;
+    const gameOver = isGameOver(nextBoard);
+
+    state = {
+      board: nextBoard,
+      score: nextScore,
+      gameOver,
+    };
+
+    if (gameOver) {
+      leaderboard = saveScore(storage, nextScore, Date.now());
+      showGameOver();
+    }
+
+    animationLock = true;
+    animateBoard(direction);
+    render(previousBoard);
+    window.setTimeout(function () {
+      animationLock = false;
+    }, 140);
+  }
+
+  document.addEventListener("keydown", function (event) {
+    const direction = KEYBOARD_DIRECTION_MAP[event.key];
+    if (!direction || !modalElement.classList.contains("hidden")) {
+      return;
+    }
+
+    event.preventDefault();
+    handleMove(direction);
+  });
+
+  restartButton.addEventListener("click", restartGame);
+  modalRestartButton.addEventListener("click", restartGame);
+
+  initializeBoard();
+  render();
+})();
